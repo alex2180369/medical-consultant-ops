@@ -1,0 +1,69 @@
+name: Health Monitor
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install httpx
+
+      - name: Run external health check
+        id: health
+        env:
+          SITE_URL: ${{ vars.SITE_URL || 'https://помощники-консультанты.рф' }}
+          OPS_TOKEN: ${{ secrets.OPS_TOKEN }}
+          REMEDIATE_URL: ${{ vars.REMEDIATE_URL || 'https://помощники-консультанты.рф/ops/remediate' }}
+        run: python healthcheck/check_remote.py
+        continue-on-error: true
+
+      - name: Notify via ntfy on failure
+        if: steps.health.outcome == 'failure'
+        env:
+          NTFY_TOPIC: ${{ vars.NTFY_TOPIC }}
+        run: |
+          if [ -n "$NTFY_TOPIC" ]; then
+            curl -s -d "Проверка с GitHub Actions не прошла. См. Actions: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+              -H "Title: 🚨 Medical Consultant DOWN" \
+              -H "Priority: high" \
+              -H "Tags: warning,github" \
+              "https://ntfy.sh/${NTFY_TOPIC}"
+          fi
+
+      - name: Create GitHub issue on failure
+        if: steps.health.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `🚨 Сайт недоступен: ${new Date().toISOString()}`;
+            const body = [
+              'Автоматическая проверка с GitHub Actions завершилась с ошибкой.',
+              '',
+              `- Workflow: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              `- SITE_URL: ${{ vars.SITE_URL || 'https://помощники-консультанты.рф' }}`,
+              '',
+              'Служба устранения неисправностей на сервере должна была запуститься автоматически.',
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ['incident', 'automated'],
+            });
+
+      - name: Fail workflow if unhealthy
+        if: steps.health.outcome == 'failure'
+        run: exit 1
