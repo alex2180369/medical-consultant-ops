@@ -44,7 +44,6 @@ systemctl daemon-reload
 systemctl enable --now medical-consultant-ops-api.service
 
 echo "==> Установка watchdog systemd timer"
-install -m 755 "$OPS_DIR/remediation/watchdog.py" /usr/local/bin/medical-consultant-watchdog
 cat > /etc/systemd/system/medical-consultant-watchdog.service <<EOF
 [Unit]
 Description=Medical Consultant watchdog remediation
@@ -52,7 +51,8 @@ After=docker.service network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=$OPS_DIR/.venv/bin/python /usr/local/bin/medical-consultant-watchdog
+WorkingDirectory=$OPS_DIR
+ExecStart=$OPS_DIR/.venv/bin/python $OPS_DIR/remediation/watchdog.py
 EOF
 
 cat > /etc/systemd/system/medical-consultant-watchdog.timer <<'EOF'
